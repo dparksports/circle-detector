@@ -116,18 +116,11 @@ def find_circle(img):
     imguint = np.asarray(imgint, dtype=np.uint8)
     # show(imguint)
 
-    kernel = np.ones((3, 3), np.uint8)
-    dilate = cv2.dilate(imguint, kernel, iterations=3)
-    # show(dilate)
-
-    closing = cv2.morphologyEx(dilate, cv2.MORPH_CLOSE, kernel)
-    # show(closing)
-
-    # for i in range(7):
-    #     gaussian = gaussian_filter(closing, sigma=i)
+    # for i in range(5):
+    #     gaussian = gaussian_filter(imgint, sigma=i)
     #     show(gaussian)
-
-    gaussian = gaussian_filter(closing, sigma=4)
+    #
+    gaussian = gaussian_filter(imguint, sigma=2)
     # show(gaussian)
 
     # circles = cv2.HoughCircles(image=gaussian,
@@ -140,11 +133,8 @@ def find_circle(img):
     #                            maxRadius=50
     #                            )
 
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, minDist= 10,, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, 10, 50)
-    # circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50)
-
+    circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, 1, 200, param1=30, param2=45, minRadius=10, maxRadius=50)
+    circles = cv2.HoughCircles(imguint, cv2.HOUGH_GRADIENT, 1, 200, param1=30, param2=45, minRadius=10, maxRadius=50)
     if circles is not None:
         # convert the (x, y) coordinates and radius of the circles to integers
         circles = np.round(circles[0, :]).astype("int")
@@ -304,15 +294,15 @@ def iou(params0, params1):
     shape0 = Point(row0, col0).buffer(rad0)
     shape1 = Point(row1, col1).buffer(rad1)
 
-    result = shape0.intersection(shape1).area / shape0.union(shape1).area
-    print('iou:', result)
-
-    return (result)
+    return (
+        shape0.intersection(shape1).area /
+        shape0.union(shape1).area
+    )
 
 
 np.set_printoptions(threshold=np.inf)
 results = []
-for _ in range(40):
+for _ in range(20):
     # params, img = noisy_circle(200, 50, 2)
     params, img = noisy_circle(200, 50, 2)
     detected = find_circle(img)

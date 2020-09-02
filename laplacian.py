@@ -31,7 +31,7 @@ def print_xyr(img):
     # show(scaled)
 
     imgint = np.asarray(scaled, dtype=np.uint8)
-    # show(imgint)
+    show(imgint)
 
     # circles = cv2.HoughCircles(imgint, cv2.HOUGH_GRADIENT, 1.2, 2*50)
     circles = cv2.HoughCircles(image=imgint,
@@ -40,7 +40,7 @@ def print_xyr(img):
                                minDist=2 * 50,
                                param1=50,
                                param2=50,
-                               minRadius=10,
+                               minRadius=3,
                                maxRadius=50
                                )
     if circles is not None:
@@ -52,7 +52,7 @@ def print_xyr(img):
             # cv2.rectangle(output, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
 
         # show(np.hstack([img, output]))
-    # print('circles:', circles)
+    print('circles:', circles)
 
 def white(img):
     show(img)
@@ -81,7 +81,7 @@ def noisy_circle(size, radius, noise):
     # Circle
     row = np.random.randint(size)
     col = np.random.randint(size)
-    rad = np.random.randint(10, max(10, radius))
+    rad = radius
     draw_circle(img, row, col, rad)
     log_nonzero(img)
     # show(img)
@@ -93,70 +93,6 @@ def noisy_circle(size, radius, noise):
     return (row, col, rad), img
 
 def find_circle(img):
-    # show(img)
-    # noise = 1
-    # img -= noise * np.random.rand(*img.shape)
-    # show(img)
-
-    scaled = (255 * (img - np.min(img)) / np.ptp(img)).astype(int)
-    imgint = np.asarray(scaled, dtype=np.int16)
-    # show(imgint)
-
-    minmax(imgint)
-    imgint -= 2 * np.median(imgint).astype(int)
-    # imgint -= 2 * np.mean(imgint).astype(int)
-    # show(imgint)
-
-    # imgint -= np.max(imgint)
-    # show(imgint)
-
-    imgint[imgint < 0] = 0
-    # show(imgint)
-
-    imguint = np.asarray(imgint, dtype=np.uint8)
-    # show(imguint)
-
-    kernel = np.ones((3, 3), np.uint8)
-    dilate = cv2.dilate(imguint, kernel, iterations=3)
-    # show(dilate)
-
-    closing = cv2.morphologyEx(dilate, cv2.MORPH_CLOSE, kernel)
-    # show(closing)
-
-    # for i in range(7):
-    #     gaussian = gaussian_filter(closing, sigma=i)
-    #     show(gaussian)
-
-    gaussian = gaussian_filter(closing, sigma=4)
-    # show(gaussian)
-
-    # circles = cv2.HoughCircles(image=gaussian,
-    #                            method=cv2.HOUGH_GRADIENT,
-    #                            dp=1.2,
-    #                            minDist=2 * 10,
-    #                            param1=50,
-    #                            param2=50,
-    #                            minRadius=10,
-    #                            maxRadius=50
-    #                            )
-
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, minDist= 10,, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, 10, 50)
-    # circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50)
-
-    if circles is not None:
-        # convert the (x, y) coordinates and radius of the circles to integers
-        circles = np.round(circles[0, :]).astype("int")
-
-        # loop over the (x, y) coordinates and radius of the circles
-        for (x, y, r) in circles:
-            print('x,y,r:', x, y, r)
-            return x, y, r
-    return None
-
-
-def find_circle_v3(img):
     scaled = (255 * (img - np.min(img)) / np.ptp(img)).astype(int)
     imgint = np.asarray(scaled, dtype=np.uint8)
     show(imgint)
@@ -170,7 +106,6 @@ def find_circle_v3(img):
     G = pow((G_x*G_x + G_y*G_y),0.5)
     show(G)
     G[G<128] = 0
-    show(G)
 
     show(imgint)
     laplacian = np.array([[1,1,1],[1,-8,1],[1,1,1]])
@@ -304,19 +239,18 @@ def iou(params0, params1):
     shape0 = Point(row0, col0).buffer(rad0)
     shape1 = Point(row1, col1).buffer(rad1)
 
-    result = shape0.intersection(shape1).area / shape0.union(shape1).area
-    print('iou:', result)
-
-    return (result)
+    return (
+        shape0.intersection(shape1).area /
+        shape0.union(shape1).area
+    )
 
 
 np.set_printoptions(threshold=np.inf)
 results = []
-for _ in range(40):
+for _ in range(1000):
     # params, img = noisy_circle(200, 50, 2)
     params, img = noisy_circle(200, 50, 2)
     detected = find_circle(img)
-    if detected is not None:
-        results.append(iou(params, detected))
+    results.append(iou(params, detected))
 results = np.array(results)
 print((results > 0.7).mean())

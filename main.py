@@ -6,6 +6,7 @@ from scipy.ndimage import convolve
 from scipy import ndimage, misc
 import matplotlib.pyplot as plt
 import cv2
+from PIL import Image
 
 def show(img):
     plt.imshow(img)
@@ -83,16 +84,135 @@ def noisy_circle(size, radius, noise):
     col = np.random.randint(size)
     rad = np.random.randint(10, max(10, radius))
     draw_circle(img, row, col, rad)
-    log_nonzero(img)
+    # log_nonzero(img)
     # show(img)
 
     # Noise
     img += noise * np.random.rand(*img.shape)
-    log_nonzero(img)
+    # log_nonzero(img)
     # show(img)
     return (row, col, rad), img
 
-def find_circle(img):
+def find_circle(params, img):
+    scaled = (255 * (img - np.min(img)) / np.ptp(img)).astype(int)
+    # show(scaled)
+ 
+    imgint = np.asarray(scaled, dtype=np.int16)
+    imgint -= 2 * np.median(imgint).astype(int)
+    # show(imgint)
+    imgint[imgint < 0] = 0
+    # show(imgint)
+
+    hist, _ = np.histogram(imgint, bins=np.max(imgint))
+    # hist = hist.astype(np.int32)
+    index = 0
+    for value in hist:
+        index += 1
+        if value > 20:
+            imgint[imgint < index] = 0
+            hist, _ = np.histogram(imgint, bins=np.max(imgint))
+
+    # show(imgint)
+
+    nonzeroindices = np.nonzero(imgint)
+    imgint[nonzeroindices] = 255
+    # show(imgint)
+
+    # mask_gray = cv2.normalize(src=imguint, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
+    # image = Image.fromarray(imgint.astype(np.uint8))
+    # grayImage = cv2.cvtColor(imguint, cv2.COLOR_GRAY2BGR)
+
+    imguint = np.asarray(imgint, dtype=np.uint8)
+    img_cv = cv2.resize(imguint,(200,200))
+    # img_cv = 255 - img_cv
+    # show(img_cv)
+
+    # contours, hierarchy = cv2.findContours(img_cv, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # contour_img = cv2.drawContours(img_cv, contours, -1, (255,255,255), 3)
+    # cv2.imshow('contours', contour_img)
+    # show(img_cv)
+
+    # iContours = 0
+    # for contour in contours:
+    #     cv2.drawContours(imgint, contours, iContours, (255, 255, 255), 3)
+    #     iContours += 1    
+
+
+    # gray = cv2.medianBlur(img_cv, 3)
+    # show(gray)
+    # hist, _ = np.histogram(gray, bins=np.max(gray))
+    # show(threshed)
+
+    circles = cv2.HoughCircles(img_cv, cv2.HOUGH_GRADIENT, 1, 10,
+                               param1=200, param2=100,
+                               minRadius=10, maxRadius=50)
+
+
+    # threshed = cv2.adaptiveThreshold(imguint, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 3, 0)
+    # gray = cv2.medianBlur(threshed, 3)
+    # hist, _ = np.histogram(threshed, bins=np.max(threshed))
+    # show(threshed)
+
+    # ret, thresh = cv2.threshold(scaled, 172, 255, 0)
+    # show(thresh)
+
+    # contours, hierarchy = cv2.findContours(mask_gray, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # iContours = 0
+    # for contour in contours:
+    #     cv2.drawContours(imgint, contours, iContours, (255, 255, 255), 3)
+    #     iContours += 1    
+    # show(imgint)
+
+    found_circles = []
+    guess_dp = 1.0
+    minimum_circle_size = 10      #this is the range of possible circle in pixels you want to find
+    maximum_circle_size = 50     #maximum possible circle size you're willing to find in pixels
+
+    max_guess_accumulator_array_threshold = 100     #minimum of 1, no maximum, (max 300?) the quantity of votes 
+    guess_accumulator_array_threshold = max_guess_accumulator_array_threshold
+    while guess_accumulator_array_threshold > 1:
+        guess_radius = maximum_circle_size
+
+        while guess_dp < 9:
+            while True:
+                circles = cv2.HoughCircles(img_cv, 
+                        cv2.HOUGH_GRADIENT, 
+                        dp=guess_dp,               #resolution of accumulator array.
+                        minDist=100,                #number of pixels center of circles should be from each other, hardcode
+                        param1=50,
+                        param2=guess_accumulator_array_threshold,
+                        minRadius=minimum_circle_size,    #HoughCircles will look for circles at minimum this size
+                        maxRadius=maximum_circle_size     #HoughCircles will look for circles at maximum this size
+                        )
+                if circles is not None:
+                    circles = np.round(circles[0, :]).astype("int")
+                    for (x,y,r) in circles:
+                        detected = x, y, r
+                        found_circles.append(detected)
+                        print("iou:", detected, iou(params, detected))
+                        
+                    break
+
+                guess_radius -= 2 
+                if guess_radius < minimum_circle_size:
+                    break;
+            guess_dp += 1.5
+        guess_accumulator_array_threshold -= 2
+
+
+    if len(found_circles) > 0:
+        return found_circles[0]
+    # if circles is not None:
+    #     circles = np.round(circles[0, :]).astype("int")
+    #     for (x, y, r) in circles:
+    #         print('x,y,r:', x, y, r)
+    #         return x, y, r
+    # else:
+    #    show(mask_gray)
+    return None
+
+
+def find_circlev4(img):
     # show(img)
     # noise = 1
     # img -= noise * np.random.rand(*img.shape)
@@ -102,9 +222,9 @@ def find_circle(img):
     imgint = np.asarray(scaled, dtype=np.int16)
     # show(imgint)
 
-    minmax(imgint)
+    # minmax(imgint)
     imgint -= 2 * np.median(imgint).astype(int)
-    # imgint -= 2 * np.mean(imgint).astype(int)
+#    imgint -= 2 * np.mean(imgint).astype(int)
     # show(imgint)
 
     # imgint -= np.max(imgint)
@@ -113,46 +233,65 @@ def find_circle(img):
     imgint[imgint < 0] = 0
     # show(imgint)
 
-    imguint = np.asarray(imgint, dtype=np.uint8)
+    imguint = np.asarray(imgint, dtype=np.uint)
     # show(imguint)
 
-    kernel = np.ones((3, 3), np.uint8)
-    dilate = cv2.dilate(imguint, kernel, iterations=3)
+    # kernel = np.ones((3, 3), np.uint8)
+    # dilate = cv2.dilate(imguint, kernel, iterations=3)
     # show(dilate)
 
-    closing = cv2.morphologyEx(dilate, cv2.MORPH_CLOSE, kernel)
+    # closing = cv2.morphologyEx(dilate, cv2.MORPH_CLOSE, kernel)
     # show(closing)
 
     # for i in range(7):
     #     gaussian = gaussian_filter(closing, sigma=i)
     #     show(gaussian)
 
-    gaussian = gaussian_filter(closing, sigma=4)
+    # gaussian = gaussian_filter(closing, sigma=4)
     # show(gaussian)
 
-    # circles = cv2.HoughCircles(image=gaussian,
-    #                            method=cv2.HOUGH_GRADIENT,
-    #                            dp=1.2,
-    #                            minDist=2 * 10,
-    #                            param1=50,
-    #                            param2=50,
-    #                            minRadius=10,
-    #                            maxRadius=50
-    #                            )
+    uint_img = np.array(imguint).astype('uint8')
+    gray = cv2.cvtColor(uint_img, cv2.COLOR_GRAY2BGR)
+    mask_gray = cv2.normalize(src=imguint, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
 
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, minDist= 10,, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50, param1=30, param2=45, minRadius=10, maxRadius=50)
-    # circles = cv2.HoughCircles(gaussian, cv2.HOUGH_GRADIENT, 10, 50)
-    # circles = cv2.HoughCircles(closing, cv2.HOUGH_GRADIENT, 10, 50)
+    guess_dp = 1.0
+    minimum_circle_size = 10      #this is the range of possible circle in pixels you want to find
+    maximum_circle_size = 50     #maximum possible circle size you're willing to find in pixels
+
+    max_guess_accumulator_array_threshold = 100     #minimum of 1, no maximum, (max 300?) the quantity of votes 
+    guess_accumulator_array_threshold = max_guess_accumulator_array_threshold
+    while guess_accumulator_array_threshold > 1:
+        guess_radius = maximum_circle_size
+
+        while guess_dp < 9:
+            while True:
+                circles = cv2.HoughCircles(mask_gray, 
+                        cv2.HOUGH_GRADIENT, 
+                        dp=guess_dp,               #resolution of accumulator array.
+                        minDist=100,                #number of pixels center of circles should be from each other, hardcode
+                        param1=50,
+                        param2=guess_accumulator_array_threshold,
+                        minRadius=minimum_circle_size,    #HoughCircles will look for circles at minimum this size
+                        maxRadius=maximum_circle_size     #HoughCircles will look for circles at maximum this size
+                        )
+                if circles is not None:
+                    print(circles)
+                    break
+
+                guess_radius -= 2 
+                if guess_radius < minimum_circle_size:
+                    break;
+            guess_dp += 1.5
+        guess_accumulator_array_threshold -= 2
+
 
     if circles is not None:
-        # convert the (x, y) coordinates and radius of the circles to integers
         circles = np.round(circles[0, :]).astype("int")
-
-        # loop over the (x, y) coordinates and radius of the circles
         for (x, y, r) in circles:
             print('x,y,r:', x, y, r)
             return x, y, r
+    # else:
+    #    show(mask_gray)
     return None
 
 
@@ -305,18 +444,22 @@ def iou(params0, params1):
     shape1 = Point(row1, col1).buffer(rad1)
 
     result = shape0.intersection(shape1).area / shape0.union(shape1).area
-    print('iou:', result)
+    # print('iou:', result)
 
     return (result)
 
 
+results = [1,2,3]
 np.set_printoptions(threshold=np.inf)
-results = []
-for _ in range(40):
+
+for _ in range(1000):
     # params, img = noisy_circle(200, 50, 2)
     params, img = noisy_circle(200, 50, 2)
-    detected = find_circle(img)
+    print('params:', params)
+
+    detected = find_circle(params, img)
     if detected is not None:
         results.append(iou(params, detected))
 results = np.array(results)
 print((results > 0.7).mean())
+

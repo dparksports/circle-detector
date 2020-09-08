@@ -1,65 +1,33 @@
+import logging
+logging.basicConfig(filename='output.txt', filemode='w', format=' %(message)s', level=logging.INFO)
+
+from typing import Optional, Tuple, Callable
+import matplotlib
+matplotlib.use('Agg')
 import numpy as np
 from shapely.geometry.point import Point
 from skimage.draw import circle_perimeter_aa
-from skimage.transform import hough_circle, hough_circle_peaks
-from scipy.ndimage import gaussian_filter
-from scipy.ndimage import convolve
-from scipy import ndimage, misc
 import matplotlib.pyplot as plt
-import cv2
 
-def show(img):
-    plt.imshow(img)
-    plt.show()
+import argparse
+import torch
+import torch.nn as nn
+import torch.utils.data
+import torch.nn.functional as F
+import time
 
-def log(img):
-    img16 = np.asarray(img, dtype=np.float16)
-    print('img16:', img16.shape, img16)
+from torch_lr_finder import LRFinder
+from torchvision.transforms import functional as trF
+logger = logging.getLogger('main')
+logger.setLevel(logging.INFO)
+# ============================= #
+#       Original script         #
+# ============================= #
 
-def minmax(img):
-    print('minmax:', np.min(img), np.max(img), np.median(img), np.mean(img), img.shape)
 
-def log_nonzero(img):
-    img16 = np.asarray(img, dtype=np.float16)
-    rows, cols = np.nonzero(img16)
-    nonzeros = img16[rows,cols]
+# passing model to original script via this variable
+global_model: Optional['FindCircleNet'] = None
 
-    print('nonzeros:', np.mean(nonzeros), np.median(nonzeros), nonzeros.shape)
-    # print('nonzeros:', nonzeros)
-
-def print_xyr(img):
-    scaled = (255 * (img - np.min(img)) / np.ptp(img)).astype(int)
-    # show(scaled)
-
-    imgint = np.asarray(scaled, dtype=np.uint8)
-    # show(imgint)
-
-    # circles = cv2.HoughCircles(imgint, cv2.HOUGH_GRADIENT, 1.2, 2*50)
-    circles = cv2.HoughCircles(image=imgint,
-                               method=cv2.HOUGH_GRADIENT,
-                               dp=1.2,
-                               minDist=2 * 50,
-                               param1=50,
-                               param2=50,
-                               minRadius=10,
-                               maxRadius=50
-                               )
-    if circles is not None:
-        output = np.zeros((img.shape[0], imgint.shape[1]))
-        circles = np.round(circles[0, :]).astype("int")
-        for (x, y, r) in circles:
-            print('x,y,r:', y, x, r)
-            # cv2.circle(output, (x, y), r, (0, 255, 0), 4)
-            # cv2.rectangle(output, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
-
-        # show(np.hstack([img, output]))
-    # print('circles:', circles)
-
-def white(img):
-    show(img)
-    whites = np.array(np.where(img == img.max()))
-    show(whites)
-    print('whites:', whites)
 
 def draw_circle(img, row, col, rad):
     rr, cc, val = circle_perimeter_aa(row, col, rad)
@@ -69,12 +37,8 @@ def draw_circle(img, row, col, rad):
         (cc >= 0) &
         (cc < img.shape[1])
     )
-
     img[rr[valid], cc[valid]] = val[valid]
 
-    zeros = np.zeros((img.shape[0], img.shape[0]), dtype=np.float)
-    zeros[rr[valid], cc[valid]] = val[valid] * 255
-    print_xyr(zeros)
 
 def noisy_circle(size, radius, noise):
     img = np.zeros((size, size), dtype=np.float)
@@ -84,89 +48,20 @@ def noisy_circle(size, radius, noise):
     col = np.random.randint(size)
     rad = np.random.randint(10, max(10, radius))
     draw_circle(img, row, col, rad)
-    # log_nonzero(img)
-    # show(img)
 
     # Noise
     img += noise * np.random.rand(*img.shape)
-    # log_nonzero(img)
-    # show(img)
     return (row, col, rad), img
 
-def find_circle(params, img):
-    scaled = (255 * (img - np.min(img)) / np.ptp(img)).astype(int)
-    # show(scaled)
- 
-    imgint = np.asarray(scaled, dtype=np.int16)
-    imgint -= 2 * np.median(imgint).astype(int)
-    # show(imgint)
-    imgint[imgint < 0] = 0
-    # show(imgint)
 
-    hist, _ = np.histogram(imgint, bins=np.max(imgint))
-    # hist = hist.astype(np.int32)
-    index = 0
-    for value in hist:
-        index += 1
-        if value > 20:
-            imgint[imgint < index] = 0
-            hist, _ = np.histogram(imgint, bins=np.max(imgint))
-
-    # show(imgint)
-
-    nonzeroindices = np.nonzero(imgint)
-    imgint[nonzeroindices] = 255
-    imgint = 255 - imgint
-    # show(imgint)
-
-    imguint = np.asarray(imgint, dtype=np.uint8)
-    img_cv = cv2.resize(imguint,(200,200))
-
-    best_iou = 0
-    best_circle = None
-    guess_dp = 0.5
-    minimum_circle_size = 10      #this is the range of possible circle in pixels you want to find
-    maximum_circle_size = 50     #maximum possible circle size you're willing to find in pixels
-
-    max_guess_accumulator_array_threshold = 100     #minimum of 1, no maximum, (max 300?) the quantity of votes 
-    guess_accumulator_array_threshold = max_guess_accumulator_array_threshold
-    while guess_accumulator_array_threshold > 1:
-        guess_radius = maximum_circle_size
-
-        while guess_dp < 9:
-            while True:
-                circles = cv2.HoughCircles(img_cv, 
-                        cv2.HOUGH_GRADIENT, 
-                        dp=guess_dp,               #resolution of accumulator array.
-                        minDist=5,                #number of pixels center of circles should be from each other, hardcode
-                        param1=50,
-                        param2=guess_accumulator_array_threshold,
-                        minRadius=minimum_circle_size,    #HoughCircles will look for circles at minimum this size
-                        maxRadius=maximum_circle_size     #HoughCircles will look for circles at maximum this size
-                        )
-                if circles is not None:
-                    # circles = np.round(circles[0, :]).astype("int")
-                    circles = circles[0, :].astype("float")
-                    for (x,y,r) in circles:
-                        detected = y, x, r
-                        score = iou(params, detected)
-                        if score > best_iou:
-                            best_iou = score
-                            best_circle = detected
-                            print("best_circle:", detected, iou(params, detected))
-                        
-                    break
-
-                guess_radius -= 1 
-                if guess_radius < minimum_circle_size:
-                    break;
-            guess_dp += 0.025
-        guess_accumulator_array_threshold -= 1
-
-
-    if best_iou > 0:
-        return best_circle
-    return None
+def find_circle(img):
+    # Fill in this function
+    model = global_model
+    model.eval()
+    img = trF.to_tensor(img.astype(np.float32)).to(device)
+    with torch.no_grad():
+        output = model(img[None, ...])
+    return output[0]
 
 
 def iou(params0, params1):
@@ -176,23 +71,229 @@ def iou(params0, params1):
     shape0 = Point(row0, col0).buffer(rad0)
     shape1 = Point(row1, col1).buffer(rad1)
 
-    result = shape0.intersection(shape1).area / shape0.union(shape1).area
-    # print('iou:', result)
+    return (
+        shape0.intersection(shape1).area /
+        shape0.union(shape1).area
+    )
 
-    return (result)
 
-
-results = [1,2,3]
-np.set_printoptions(threshold=np.inf)
-
-for _ in range(1000):
-    # params, img = noisy_circle(200, 50, 2)
-    params, img = noisy_circle(200, 50, 2)
-    print('params:', params)
-
-    detected = find_circle(params, img)
-    if detected is not None:
+def main():
+    results = []
+    for _ in range(1000):
+        params, img = noisy_circle(200, 50, 2)
+        detected = find_circle(img)
         results.append(iou(params, detected))
-results = np.array(results)
-print((results > 0.7).mean())
+    results = np.array(results)
+    print((results > 0.7).mean())
 
+
+# ============================= #
+#        Training code          #
+# ============================= #
+
+batch_size = 64
+# train on the GPU or on the CPU, if a GPU is not available
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+model_checkpoint = 'circle-detector.pth'
+
+
+class CircleDataset(torch.utils.data.Dataset):
+    def __init__(self, length: int, transforms: Optional[Callable] = None, seed: int = 10):
+        super().__init__()
+        self.seed = seed
+        self.length = length
+        self.transforms = transforms
+        self.images = []
+        self.circles = []
+        self._generate()
+
+    def _generate(self):
+        np.random.seed(self.seed)
+        for i in range(self.length):
+            circle, img = noisy_circle(200, 50, 2)
+            self.images.append(img.astype(np.float32))
+            self.circles.append(np.array(circle, dtype=np.float32))
+
+    def __getitem__(self, idx) -> Tuple[np.ndarray, np.ndarray]:
+        img = self.images[idx]
+        target = self.circles[idx]
+        if self.transforms is not None:
+            img, target = self.transforms(img, target)
+        return img[np.newaxis, ...], target
+
+    def __len__(self):
+        return len(self.images)
+
+
+class FindCircleNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        # reduce model size to be less than 1M params
+        inverted_residual_setting = [
+            # t, c, n, s
+            [1, 16, 1, 1],
+            [2, 24, 2, 2],
+            [2, 32, 2, 2],
+            [2, 64, 3, 2],
+            [2, 96, 3, 1],
+            [2, 160, 3, 2],
+            [2, 320, 1, 1],
+        ]
+        # only loads model definition
+        self.model = torch.hub.load('pytorch/vision:v0.6.0', 'mobilenet_v2', pretrained=False, num_classes=3,
+                                    inverted_residual_setting=inverted_residual_setting)
+        self.model.features[0][0] = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+
+    def forward(self, x):
+        return self.model.forward(x)
+
+
+def train(model: FindCircleNet, train_data: CircleDataset, valid_data: CircleDataset, epochs: int = 10):
+    lr = 0.02
+    weight_decay = 0
+    clip = None
+    train_loader = torch.utils.data.DataLoader(train_data,
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               pin_memory=False)
+    valid_loader = torch.utils.data.DataLoader(valid_data,
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               pin_memory=False)
+
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs)
+    loss_function = F.mse_loss
+    step = 0
+    train_losses = []
+    train_iou = []
+    for current_epoch in range(epochs):
+        logger.info(f"epoch {current_epoch}")
+        if current_epoch < 0.98*epochs:
+            model.train()
+        tic = time.time()
+        for (x, target) in iter(train_loader):
+            x = x.to(device)
+            target = target.to(device)
+            output = model(x)
+            loss = loss_function(target, output)
+            train_losses.append(float(loss))
+            train_iou.extend(iou_metric(output, target))
+            optimizer.zero_grad()
+            loss.backward()
+            if clip is not None:
+                torch.nn.utils.clip_grad_norm(model.parameters(), clip)
+            optimizer.step()
+            scheduler.step()
+            step += 1
+
+            # time step duration:
+            n = 10
+            if step % n == 0:
+                toc = time.time()
+
+                metric = np.mean(np.array(train_iou) > 0.7)
+                logger.debug(f"one training step does take approximately {(toc - tic) * (1.0/n)} seconds)")
+                logger.info(f"Step: {step} Training loss {np.mean(train_losses):.4f}, iou {np.mean(train_iou):.4f}, metric {metric:.4f}")
+                train_losses = []
+                train_iou = []
+
+        valid_losses = []
+        valid_iou = []
+        # Validation step
+        model.eval()
+        for x, target in valid_loader:
+            x = x.to(device)
+            target = target.to(device)
+            with torch.no_grad():
+                output = model(x)
+                loss = loss_function(target, output)
+                valid_losses.append(float(loss))
+                valid_iou.extend(iou_metric(output, target))
+        metric = np.mean(np.array(valid_iou) > 0.7)
+        logger.info(f"Step: {step} Validation loss {np.mean(valid_losses):.4f}, iou {np.mean(valid_iou):.4f}, metric {metric:.4f}")
+
+
+def iou_metric(input: np.ndarray, target: np.ndarray):
+    ious = []
+    for i, t in zip(input, target):
+        ious.append(iou(i, t))
+    return np.array(ious)
+
+
+def find_lr(model: torch.nn.Module, train_data: CircleDataset):
+    # range test for finding learning rate as described in
+    # https://towardsdatascience.com/finding-good-learning-rate-and-the-one-cycle-policy-7159fe1db5d6
+    lr_image = 'learning_rate.png'
+    train_loader = torch.utils.data.DataLoader(train_data,
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               pin_memory=False)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-7, weight_decay=1e-2)
+    lr_finder = LRFinder(model, optimizer, criterion, device="cuda")
+    logger.info("Running range test for learning rate")
+    lr_finder.range_test(train_loader, end_lr=100, num_iter=100)
+    fig, ax = plt.subplots()
+    lr_finder.plot(ax=ax)  # to inspect the loss-learning rate graph
+    logger.info(f"Saving image with learning rate plot to {lr_image}")
+    fig.savefig(lr_image, dpi=fig.dpi)
+    lr_finder.reset()  # to reset the model and optimizer to their initial state
+
+
+def eval_model(model: FindCircleNet):
+    model.eval()
+    # trying to retain structure of original program
+    global global_model
+    global_model = model
+    main()
+
+
+def load_data(data_size: int) -> Tuple[CircleDataset, CircleDataset]:
+    valid_data = CircleDataset(data_size // 10, seed=20)
+    train_data = CircleDataset(data_size, seed=30)
+    return train_data, valid_data
+
+
+def count_parameters(model: torch.nn.Module):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def create_model(checkpoint: Optional[str] = None) -> FindCircleNet:
+    model = FindCircleNet()
+    if checkpoint is not None:
+        model.load_state_dict(torch.load(checkpoint))
+    model.to(device)
+    logger.debug("Model info:")
+    logger.debug(str(model))
+
+    logger.info(f"Number of model  parameters: {count_parameters(model)}")
+    return model
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Train model or run trained model')
+    parser.add_argument('command', choices=['find-lr', 'train', 'eval'], help="Use find-lr to run range test and save plot to image, train "
+                                                                              "to train the model or eval to run evaluation")
+    parser.add_argument('--data-size', default=10000, help='Training data size')
+    args = parser.parse_args()
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    logger.addHandler(ch)
+
+    logger.info(f"Using device: {device}")
+    train_data, valid_data = load_data(args.data_size)
+    model = create_model(checkpoint=None if args.command != 'eval' else model_checkpoint)
+
+    if args.command == 'find-lr':
+        find_lr(model, train_data)
+    elif args.command == 'train':
+        train(model, train_data, valid_data, epochs=100)
+        torch.save(model.state_dict(), model_checkpoint)
+        # run evaluation in the end of training
+        eval_model(model)
+    elif args.command == 'eval':
+        model.load_state_dict(torch.load(model_checkpoint))
+        eval_model(model)
+    else:
+        raise ValueError(f"Unknown command: {args.command}")

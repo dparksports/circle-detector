@@ -1,0 +1,2 @@
+ Using device: cpu
+ Number of model  parameters: 999363

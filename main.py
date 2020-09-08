@@ -124,7 +124,7 @@ def find_circle(params, img):
 
     best_iou = 0
     best_circle = None
-    guess_dp = 1.0
+    guess_dp = 0.5
     minimum_circle_size = 10      #this is the range of possible circle in pixels you want to find
     maximum_circle_size = 50     #maximum possible circle size you're willing to find in pixels
 
@@ -138,14 +138,15 @@ def find_circle(params, img):
                 circles = cv2.HoughCircles(img_cv, 
                         cv2.HOUGH_GRADIENT, 
                         dp=guess_dp,               #resolution of accumulator array.
-                        minDist=100,                #number of pixels center of circles should be from each other, hardcode
+                        minDist=5,                #number of pixels center of circles should be from each other, hardcode
                         param1=50,
                         param2=guess_accumulator_array_threshold,
                         minRadius=minimum_circle_size,    #HoughCircles will look for circles at minimum this size
                         maxRadius=maximum_circle_size     #HoughCircles will look for circles at maximum this size
                         )
                 if circles is not None:
-                    circles = np.round(circles[0, :]).astype("int")
+                    # circles = np.round(circles[0, :]).astype("int")
+                    circles = circles[0, :].astype("float")
                     for (x,y,r) in circles:
                         detected = y, x, r
                         score = iou(params, detected)
@@ -156,11 +157,11 @@ def find_circle(params, img):
                         
                     break
 
-                guess_radius -= 2 
+                guess_radius -= 1 
                 if guess_radius < minimum_circle_size:
                     break;
-            guess_dp += 1.5
-        guess_accumulator_array_threshold -= 2
+            guess_dp += 0.025
+        guess_accumulator_array_threshold -= 1
 
 
     if best_iou > 0:
@@ -184,7 +185,7 @@ def iou(params0, params1):
 results = [1,2,3]
 np.set_printoptions(threshold=np.inf)
 
-for _ in range(100):
+for _ in range(1000):
     # params, img = noisy_circle(200, 50, 2)
     params, img = noisy_circle(200, 50, 2)
     print('params:', params)
